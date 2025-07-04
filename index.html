@@ -1,0 +1,278 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <title>Accurate Stopwatch</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 15px;
+      background-color: #333;
+    }
+    .stopwatch-wrapper {
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      text-align: center; /* Щоб кнопки були по центру */
+      margin: 8% auto;
+    }
+    #stopwatch {
+      font-size: 2.2em;
+      font-family: 'Courier New', Courier, monospace;
+      color: #2c3e50; /* Базовий колір тексту цифр */
+      background-color: #ecf0f1;
+      padding: 12px 10px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
+      letter-spacing: 1px;
+    }
+    .digit, .colon, .ms-digits {
+      display: inline-block;
+      /* transition тут не потрібен, якщо використовуємо @keyframes для конкретного ефекту */
+    }
+    .digit {
+        min-width: 0.6em; 
+        text-align: center;
+    }
+
+    /* Анімація пульсу */
+    @keyframes briefPulse {
+      0% { 
+        transform: scale(1); 
+        /* color: #2c3e50;  Можна залишити базовий або трохи змінити */
+      }
+      50% { 
+        transform: scale(1.15); /* Трохи більше збільшення */
+        color: #e74c3c;     /* Яскравий колір для акценту */
+      }
+      100% { 
+        transform: scale(1); 
+        /* color: #2c3e50; */
+      }
+    }
+
+    .digit.pulse-animate {
+      /* animation-name, animation-duration, animation-timing-function, animation-iteration-count */
+      animation: briefPulse 0.25s ease-out 1; /* 0.25s - тривалість одного "пульсу", 1 раз */
+    }
+
+
+    #controls button {
+      font-size: 0.9em;
+      padding: 10px 0;
+      margin: 5px;
+      width: 80px; 
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s ease, opacity 0.2s ease, color 0.2s ease;
+      color: white;
+      box-sizing: border-box;
+    }
+    #controls button:disabled {
+      background-color: #bdc3c7 !important; 
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+    #actionButton:hover:not(:disabled),
+    #resetButton:hover:not(:disabled) {
+        filter: brightness(90%);
+    }
+  </style>
+</head>
+<body>
+  <div class="stopwatch-wrapper">
+   <div id="stopwatch">
+    <span id="sw-h1" class="digit">0</span><span id="sw-h2" class="digit">0</span><span class="colon">:</span><span id="sw-m1" class="digit">0</span><span id="sw-m2" class="digit">0</span><span class="colon">:</span><span id="sw-s1" class="digit">0</span><span id="sw-s2" class="digit">0</span><span class="colon">:</span><span id="sw-ms" class="ms-digits">000</span>
+   </div>
+   <div id="controls">
+     <button id="actionButton">Start</button>
+     <button id="resetButton">Reset</button>
+   </div>
+  </div>
+
+  <script>
+    const digitsElements = {
+        h1: document.getElementById('sw-h1'), h2: document.getElementById('sw-h2'),
+        m1: document.getElementById('sw-m1'), m2: document.getElementById('sw-m2'),
+        s1: document.getElementById('sw-s1'), s2: document.getElementById('sw-s2'),
+        ms: document.getElementById('sw-ms')
+    };
+    
+    const actionButton = document.getElementById('actionButton');
+    const resetButton = document.getElementById('resetButton');
+
+    const COLOR_START = "#2ecc71";
+    const COLOR_PAUSE = "#f39c12";
+    const COLOR_CONTINUE = "#3498db";
+    const COLOR_RESET_ACTIVE = "#e74c3c";
+
+    let animationFrameId = null;
+    let timerState = "stopped"; 
+
+    let referenceTime = 0; 
+    let accumulatedTime = 0; 
+    
+    let lastDisplayedText = { 
+        h1: '0', h2: '0', m1: '0', m2: '0', s1: '0', s2: '0', ms: '000'
+    };
+
+    function pad(num, size = 2) {
+      return String(num).padStart(size, '0');
+    }
+    
+    // Функція для оновлення цифри з можливою CSS анімацією
+    function updateDigitWithPulse(element, newText, key) {
+        if (lastDisplayedText[key] !== newText) {
+            element.textContent = newText;
+            lastDisplayedText[key] = newText;
+            
+            if (key !== 'ms') { // Пульс тільки для ГГ:ХХ:СС
+                element.classList.remove('pulse-animate'); // Спочатку видаляємо, щоб анімація могла перезапуститися
+                void element.offsetWidth; // Примусовий reflow для перезапуску анімації
+                element.classList.add('pulse-animate');
+            }
+        } else if (element.textContent !== newText) { 
+            // Якщо DOM розсинхронізувався з lastDisplayedText (малоймовірно)
+            element.textContent = newText;
+        }
+    }
+
+
+    function updateStopwatchUI(totalMilliseconds) {
+        const ms = totalMilliseconds % 1000;
+        const totalSeconds = Math.floor(totalMilliseconds / 1000);
+        const seconds = totalSeconds % 60;
+        const totalMinutes = Math.floor(totalSeconds / 60);
+        const minutes = totalMinutes % 60;
+        const hours = Math.floor(totalMinutes / 60);
+
+        const hStr = pad(hours);
+        const mStr = pad(minutes);
+        const sStr = pad(seconds);
+        const msStr = pad(ms, 3);
+
+        updateDigitWithPulse(digitsElements.h1, hStr[0], 'h1');
+        updateDigitWithPulse(digitsElements.h2, hStr[1], 'h2');
+        updateDigitWithPulse(digitsElements.m1, mStr[0], 'm1');
+        updateDigitWithPulse(digitsElements.m2, mStr[1], 'm2');
+        updateDigitWithPulse(digitsElements.s1, sStr[0], 's1');
+        updateDigitWithPulse(digitsElements.s2, sStr[1], 's2');
+        
+        // Мілісекунди оновлюються напряму, без пульсу
+        if (lastDisplayedText.ms !== msStr) {
+            digitsElements.ms.textContent = msStr;
+            lastDisplayedText.ms = msStr;
+        }
+    }
+    
+    function gameLoop() { 
+        if (timerState !== "running") {
+            animationFrameId = null;
+            return; 
+        }
+
+        const currentTime = Date.now(); 
+        const elapsedTimeThisRun = currentTime - referenceTime;
+        const totalElapsed = accumulatedTime + elapsedTimeThisRun;
+        
+        updateStopwatchUI(totalElapsed);
+        
+        animationFrameId = requestAnimationFrame(gameLoop);
+    }
+
+    function startTimer() {
+        if (timerState === "running") return;
+
+        referenceTime = Date.now(); 
+        if (timerState === "stopped") { 
+            accumulatedTime = 0;
+            // Встановлюємо UI в нуль перед першим запуском
+            lastDisplayedText = { h1: '0', h2: '0', m1: '0', m2: '0', s1: '0', s2: '0', ms: '000' };
+            // Видаляємо клас анімації з усіх цифр на випадок, якщо він залишився
+            Object.values(digitsElements).forEach(el => el.classList.remove('pulse-animate'));
+            updateStopwatchUI(0); 
+        }
+        
+        timerState = "running";
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null; 
+        }
+        gameLoop(); 
+        updateButtonStates();
+    }
+
+    function pauseTimer() {
+        if (timerState !== "running") return;
+
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        const currentTime = Date.now();
+        if (referenceTime > 0) {
+            accumulatedTime += (currentTime - referenceTime);
+        }
+        referenceTime = 0;
+        timerState = "paused";
+        // Видаляємо клас анімації з усіх цифр
+        Object.values(digitsElements).forEach(el => el.classList.remove('pulse-animate'));
+        updateStopwatchUI(accumulatedTime); 
+        updateButtonStates();
+    }
+
+    function resetTimer() {
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        timerState = "stopped";
+        accumulatedTime = 0;
+        referenceTime = 0;
+        lastDisplayedText = { h1: '0', h2: '0', m1: '0', m2: '0', s1: '0', s2: '0', ms: '000' };
+        // Видаляємо клас анімації з усіх цифр
+        Object.values(digitsElements).forEach(el => el.classList.remove('pulse-animate'));
+        updateStopwatchUI(0); 
+        updateButtonStates();
+    }
+
+    function updateButtonStates() {
+      actionButton.disabled = false; 
+      if (timerState === "stopped") {
+        actionButton.textContent = "Start";
+        actionButton.style.backgroundColor = COLOR_START;
+        resetButton.disabled = true; 
+      } else if (timerState === "running") {
+        actionButton.textContent = "Pause";
+        actionButton.style.backgroundColor = COLOR_PAUSE;
+        resetButton.disabled = false; 
+        resetButton.style.backgroundColor = COLOR_RESET_ACTIVE;
+      } else if (timerState === "paused") {
+        actionButton.textContent = "Continue";
+        actionButton.style.backgroundColor = COLOR_CONTINUE;
+        resetButton.disabled = false; 
+        resetButton.style.backgroundColor = COLOR_RESET_ACTIVE;
+      }
+    }
+
+    function handleActionButtonClick() {
+      if (timerState === "stopped" || timerState === "paused") {
+        startTimer();
+      } else if (timerState === "running") {
+        pauseTimer();
+      }
+    }
+
+    actionButton.addEventListener('click', handleActionButtonClick);
+    resetButton.addEventListener('click', resetTimer);
+
+    resetTimer(); 
+  </script>
+</body>
+</html>
